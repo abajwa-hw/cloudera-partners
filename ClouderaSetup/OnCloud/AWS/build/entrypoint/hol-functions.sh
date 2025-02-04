@@ -856,7 +856,6 @@ cdp_idp_setup_user() {
    echo "cdp_region:$cdp_region"
    ansible-playbook create_keycloak_client.yml --extra-vars \
       "keycloak__admin_username=admin \
-      ansible_python_interpreter=/usr/bin/python3 \
       keycloak__admin_password=$keycloak__admin_password \
       keycloak__domain=http://$KEYCLOAK_SERVER_IP \
       keycloak__cdp_idp_name=$workshop_name \
@@ -867,7 +866,6 @@ cdp_idp_setup_user() {
    sleep 5
    ansible-playbook keycloak_hol_user_setup.yml --extra-vars \
       "keycloak__admin_username=admin \
-      ansible_python_interpreter=/usr/bin/python3 \
       keycloak__admin_password=$keycloak__admin_password \
       keycloak__domain=http://$KEYCLOAK_SERVER_IP \
       hol_keycloak_realm=master \
@@ -893,7 +891,6 @@ cdp_idp_setup_user() {
    cd /userconfig/.$USER_NAMESPACE/keycloak_ansible_config
    ansible-playbook keycloak_hol_user_fetch.yml --extra-vars \
       "keycloak__admin_username=admin \
-      ansible_python_interpreter=/usr/bin/python3 \
       keycloak__admin_password=$keycloak__admin_password \
       keycloak__domain=http://$KEYCLOAK_SERVER_IP \
       hol_keycloak_realm=master \
@@ -929,7 +926,6 @@ cdp_idp_user_teardown() {
    cd /userconfig/.$USER_NAMESPACE/keycloak_ansible_config
    ansible-playbook keycloak_hol_user_teardown.yml --extra-vars \
       "keycloak__admin_username=admin \
-      ansible_python_interpreter=/usr/bin/python3 \
       keycloak__admin_password=$keycloak__admin_password \
       keycloak__domain=http://$KEYCLOAK_SERVER_IP \
       hol_keycloak_realm=master \
@@ -978,7 +974,6 @@ deploy_cdw() {
 
    ansible-playbook $DS_CONFIG_DIR/enable-cdw.yml --extra-vars \
       "cdp_env_name=$workshop_name-cdp-env \
-      ansible_python_interpreter=/usr/bin/python3 \
       env_lb_public_subnet=$ENV_PUBLIC_SUBNETS \
       env_wrkr_private_subnet=$ENV_PRIVATE_SUBNETS \
       workshop_name=$workshop_name \
@@ -990,8 +985,7 @@ deploy_cdw() {
 disable_cdw() {
    echo "               ==========================Disabling CDW======================================"
    ansible-playbook $DS_CONFIG_DIR/disable-cdw.yml --extra-vars \
-      "ansible_python_interpreter=/usr/bin/python3 \
-      cdp_env_name=$workshop_name-cdp-env"
+      "cdp_env_name=$workshop_name-cdp-env"
 }
 #--------------------------------------------------------------------------------------------------#
 #--------------------------------------------------------------------------------------------------#
@@ -1007,7 +1001,6 @@ deploy_cde() {
 
    ansible-playbook $DS_CONFIG_DIR/enable-cde.yml --extra-vars \
       "cdp_env_name=$workshop_name-cdp-env \
-      ansible_python_interpreter=/usr/bin/python3 \
       workshop_name=$workshop_name \
       instance_type=$cde_instance_type \
       initial_instances=$cde_initial_instances \
@@ -1021,8 +1014,7 @@ deploy_cde() {
 disable_cde() {
    echo "               ==========================Disabling CDE======================================"
    ansible-playbook $DS_CONFIG_DIR/disable-cde.yml --extra-vars \
-      "ansible_python_interpreter=/usr/bin/python3 \
-      workshop_name=$workshop_name"
+      "workshop_name=$workshop_name"
 }
 #--------------------------------------------------------------------------------------------------#
 #--------------------------------------------------------------------------------------------------#
@@ -1031,7 +1023,6 @@ deploy_cml() {
    #number_vws_to_create=$(( ($number_of_workshop_users / 10) + ($number_of_workshop_users % 10 > 0) ))
    ansible-playbook $DS_CONFIG_DIR/enable-cml.yml --extra-vars \
       "cdp_env_name=$workshop_name-cdp-env \
-      ansible_python_interpreter=/usr/bin/python3 \
       workshop_name=$workshop_name \
       ws_instance_type=$cml_ws_instance_type \
       minimum_instances=$cml_min_instances \
@@ -1048,7 +1039,6 @@ disable_cml() {
    echo "               ==========================Disabling CML======================================"
    ansible-playbook $DS_CONFIG_DIR/disable-cml.yml --extra-vars \
       "cdp_env_name=$workshop_name-cdp-env \
-      ansible_python_interpreter=/usr/bin/python3 \
       workshop_name=$workshop_name"
 }
 #--------------------------------------------------------------------------------------------------#

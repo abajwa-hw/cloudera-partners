@@ -19,6 +19,7 @@ ENV LANG=C.UTF-8 LC_ALL=C.UTF-8 \
 RUN apt-get update && apt-get install -y jq wget git make unzip gcc build-essential zlib1g-dev libncurses5-dev libgdbm-dev libnss3-dev openssl libssl-dev libreadline-dev \
     bzip2 libffi-dev curl libbz2-dev libdb-dev liblzma-dev libsqlite3-dev uuid-dev python3.12 python3-pip && \
     update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1 && \
+    ln -s /usr/bin/python3 /usr/bin/python && \
     apt-get install -y certbot python3-certbot-dns-route53 && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
