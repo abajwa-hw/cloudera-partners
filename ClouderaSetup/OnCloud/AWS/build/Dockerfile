@@ -4,7 +4,7 @@
 FROM ubuntu:24.04
 
 ARG TF_VER=1.10.5
-ARG TF_QUICKSTART_VERSION=v0.8.5
+ARG TF_QUICKSTART_VERSION=v0.9.1
 # Directory for storing scripts.
 RUN mkdir -p /opt/cdp-public-cloud-automation
 

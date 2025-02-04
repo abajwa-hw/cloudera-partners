@@ -587,17 +587,18 @@ setup_keycloak_ec2() {
    cd /userconfig/.$USER_NAMESPACE/keycloak_terraform_config
 
    ########## SSL Certs Genertaion Logic
-   DOMAIN=$domain               # Base domain (e.g., example.com)
-   HOSTED_ZONE_ID=$hostedzoneid # Route53 Hosted Zone ID
-   CERT_EMAIL=admin@$DOMAIN     # Email for Let's Encrypt (e.g., admin@example.com)
+   # DOMAIN=$domain               # Base domain (e.g., example.com)
+   # HOSTED_ZONE_ID=$hostedzoneid # Route53 Hosted Zone ID
+   # CERT_EMAIL=admin@$domain     # Email for Let's Encrypt (e.g., admin@example.com)
    # Check if required variables are provided
-   if [[ -z "$workshop_name" || -z "$DOMAIN" || -z "$HOSTED_ZONE_ID" || -z "$CERT_EMAIL" ]]; then
+   if [[ -z "$workshop_name" || -z "$domain" || -z "$hostedzoneid" ]]; then
       echo "Missing Values for required parameters for SSL Certs"
       exit 1
    fi
    # Derived Variables
-   SUBDOMAIN="$workshop_name.$DOMAIN"
-   CERT_PATH="/etc/letsencrypt/live/$DOMAIN"
+   SUBDOMAIN="$workshop_name.$domain"
+   echo "=== Subdomain: $SUBDOMAIN for HostedZoneId: $hostedzoneid ==="
+   CERT_PATH="/etc/letsencrypt/live/$domain"
    echo "=== Generating Wildcard SSL Certificates ==="
    # Install Certbot if not installed
    if ! command -v certbot &>/dev/null; then
@@ -605,23 +606,33 @@ setup_keycloak_ec2() {
       export DEBIAN_FRONTEND=noninteractive
       apt-get update >/dev/null 2>&1 && apt-get install -y certbot python3-certbot-dns-route53 >/dev/null 2>&1
    fi
-   # Generate Wildcard SSL Certificates
-   certbot certonly \
-      --dns-route53 \
-      -d "*.$DOMAIN" \
-      --non-interactive \
-      --agree-tos \
-      -m "$CERT_EMAIL"
-   # Check if certificates were generated successfully
-   if [[ ! -f "$CERT_PATH/fullchain.pem" || ! -f "$CERT_PATH/privkey.pem" ]]; then
-      echo "Error: SSL certificates not generated. Exiting."
-      exit 1
+
+   SSL_MOUNT_PATH=/userconfig/sslcerts/$domain
+   mkdir -p $SSL_MOUNT_PATH
+   # Check if certificates are already generated for the same domain name
+   if [[ ! -f "$SSL_MOUNT_PATH/fullchain.pem" && ! -f "$SSL_MOUNT_PATH/privkey.pem" ]]; then
+      echo "SSL certificates doesn't exists. Starting certs generation process for Wildcard Domain: *.$domain..."
+      # Generate Wildcard SSL Certificates
+      certbot certonly \
+         --dns-route53 \
+         -d "*.$domain" \
+         --non-interactive \
+         --agree-tos \
+         -m "admin@$domain"
+      # Check if certificates were generated successfully
+      if [[ ! -f "$CERT_PATH/fullchain.pem" || ! -f "$CERT_PATH/privkey.pem" ]]; then
+         echo "Error: SSL certificates not generated. Exiting."
+         exit 1
+      fi
+      echo "SSL certificates successfully generated for *.$domain"
+      for file in /etc/letsencrypt/archive/$domain/*1.pem; do cp -v "$file" "$SSL_MOUNT_PATH/$(basename "$file" 1.pem).pem"; done
+   else
+      echo "SSL certificates already exists. Skipping certs generation process for Wildcard Domain: *.$domain..."
    fi
-   chmod 644 /etc/letsencrypt/live/$DOMAIN/*.pem
-   echo "SSL certificates successfully generated for *.$DOMAIN"
+
    # Encode SSL Certificates in Base64 (for Terraform user_data)
-   FULLCHAIN=$(cat "$CERT_PATH/fullchain.pem" | base64 -w 0)
-   PRIVKEY=$(cat "$CERT_PATH/privkey.pem" | base64 -w 0)
+   FULLCHAIN=$(cat "$SSL_MOUNT_PATH/fullchain.pem" | base64 -w 0)
+   PRIVKEY=$(cat "$SSL_MOUNT_PATH/privkey.pem" | base64 -w 0)
 
    #######
 
@@ -630,50 +641,29 @@ setup_keycloak_ec2() {
 
    echo "=== Running Terraform ==="
    # Run Terraform to provision Keycloak instance
-
    if check_aws_sg_exists "$sg_name"; then
-      echo "EC2 Security Group With the same name already exists. To avoid the failure the Security Group
-name is now updated to $sg_name-$workshop_name-sg"
-      terraform init
-      terraform apply -auto-approve \
-         -var "workshop_name=$workshop_name" \
-         -var "local_ip=$local_ip" \
-         -var "instance_keypair=$aws_key_pair" \
-         -var "aws_region=$aws_region" \
-         -var "domain=$DOMAIN" \
-         -var "wildcard_fullchain=$FULLCHAIN" \
-         -var "wildcard_privkey=$PRIVKEY" \
-         -var "kc_security_group=$sg_name-$workshop_name" \
-         -var "keycloak_admin_password=$keycloak__admin_password"
-      RETURN=$?
-      if [ $RETURN -eq 0 ]; then
-         KEYCLOAK_SERVER_IP=$(terraform output -raw elastic_ip)
-         echo $KEYCLOAK_SERVER_IP >/userconfig/keycloak_ip
-         return 0
-      else
-         return 1
-      fi
-   else
-      terraform init
-      terraform apply -auto-approve \
-         -var "workshop_name=$workshop_name" \
-         -var "local_ip=$local_ip" \
-         -var "instance_keypair=$aws_key_pair" \
-         -var "aws_region=$aws_region" \
-         -var "domain=$DOMAIN" \
-         -var "wildcard_fullchain=$FULLCHAIN" \
-         -var "wildcard_privkey=$PRIVKEY" \
-         -var "kc_security_group=$sg_name" \
-         -var "keycloak_admin_password=$keycloak__admin_password"
+      echo "EC2 Security Group with the same name already exists. Updating Security Group name to $sg_name-$workshop_name-sg"
+      sg_name="$sg_name-$workshop_name"
+   fi
 
-      RETURN=$?
-      if [ $RETURN -eq 0 ]; then
-         KEYCLOAK_SERVER_IP=$(terraform output -raw elastic_ip)
-         echo $KEYCLOAK_SERVER_IP >/userconfig/keycloak_ip
-         return 0
-      else
-         return 1
-      fi
+   terraform init
+   terraform apply -auto-approve \
+      -var "workshop_name=$workshop_name" \
+      -var "local_ip=$local_ip" \
+      -var "instance_keypair=$aws_key_pair" \
+      -var "aws_region=$aws_region" \
+      -var "domain=$domain" \
+      -var "wildcard_fullchain=$FULLCHAIN" \
+      -var "wildcard_privkey=$PRIVKEY" \
+      -var "kc_security_group=$sg_name" \
+      -var "keycloak_admin_password=$keycloak__admin_password"
+
+   RETURN=$?
+   if [ $RETURN -eq 0 ]; then
+      KEYCLOAK_SERVER_IP=$(terraform output -raw elastic_ip)
+      echo "$KEYCLOAK_SERVER_IP" >/userconfig/keycloak_ip
+   else
+      return 1
    fi
 
    # Fetch the public IP of the created Keycloak instance
@@ -681,10 +671,11 @@ name is now updated to $sg_name-$workshop_name-sg"
       echo "Error: Unable to retrieve Keycloak instance IP. Exiting."
       exit 1
    fi
+
    echo "Keycloak instance public IP: $KEYCLOAK_SERVER_IP"
    echo "=== Updating DNS Record ==="
    # Update Route53 DNS record to map subdomain to instance IP
-   aws route53 change-resource-record-sets --hosted-zone-id "$HOSTED_ZONE_ID" \
+   aws route53 change-resource-record-sets --hosted-zone-id "$hostedzoneid" \
       --change-batch '{
         "Changes": [{
             "Action": "UPSERT",
@@ -715,7 +706,7 @@ destroy_keycloak() {
    sleep 30
    echo "=== Deleting DNS Record ==="
    # Delete Route53 DNS record to unmap subdomain to instance IP
-   aws route53 change-resource-record-sets --hosted-zone-id "$HOSTED_ZONE_ID" \
+   aws route53 change-resource-record-sets --hosted-zone-id "$hostedzoneid" \
       --change-batch '{
         "Changes": [{
             "Action": "DELETE",
@@ -865,24 +856,26 @@ cdp_idp_setup_user() {
    echo "cdp_region:$cdp_region"
    ansible-playbook create_keycloak_client.yml --extra-vars \
       "keycloak__admin_username=admin \
-          keycloak__admin_password=$keycloak__admin_password \
-          keycloak__domain=http://$KEYCLOAK_SERVER_IP \
-          keycloak__cdp_idp_name=$workshop_name \
-          keycloak__realm=master \
-          keycloak__auth_realm=master \
-          cdp_region=$cdp_region"
+      ansible_python_interpreter=/usr/bin/python3 \
+      keycloak__admin_password=$keycloak__admin_password \
+      keycloak__domain=http://$KEYCLOAK_SERVER_IP \
+      keycloak__cdp_idp_name=$workshop_name \
+      keycloak__realm=master \
+      keycloak__auth_realm=master \
+      cdp_region=$cdp_region"
    echo -e "\n               =========================Creating Users & Groups=============================================="
    sleep 5
    ansible-playbook keycloak_hol_user_setup.yml --extra-vars \
       "keycloak__admin_username=admin \
-    keycloak__admin_password=$keycloak__admin_password \
-    keycloak__domain=http://$KEYCLOAK_SERVER_IP \
-    hol_keycloak_realm=master \
-    hol_session_name=$workshop_name-aw-cdp-user-group \
-    number_user_to_create=$number_of_workshop_users \
-    username_prefix=$workshop_user_prefix \
-    default_user_password=$workshop_user_default_password \
-    reset_password_on_first_login=True"
+      ansible_python_interpreter=/usr/bin/python3 \
+      keycloak__admin_password=$keycloak__admin_password \
+      keycloak__domain=http://$KEYCLOAK_SERVER_IP \
+      hol_keycloak_realm=master \
+      hol_session_name=$workshop_name-aw-cdp-user-group \
+      number_user_to_create=$number_of_workshop_users \
+      username_prefix=$workshop_user_prefix \
+      default_user_password=$workshop_user_default_password \
+      reset_password_on_first_login=True"
    sleep 10
    echo -e "\n               ==========================Synchronising Keycloak Users In CDP=================================="
    for i in $(seq -f "%02g" 1 1 $number_of_workshop_users); do
@@ -900,10 +893,11 @@ cdp_idp_setup_user() {
    cd /userconfig/.$USER_NAMESPACE/keycloak_ansible_config
    ansible-playbook keycloak_hol_user_fetch.yml --extra-vars \
       "keycloak__admin_username=admin \
-    keycloak__admin_password=$keycloak__admin_password \
-    keycloak__domain=http://$KEYCLOAK_SERVER_IP \
-    hol_keycloak_realm=master \
-    hol_session_name=$workshop_name-aw-cdp-user-group"
+      ansible_python_interpreter=/usr/bin/python3 \
+      keycloak__admin_password=$keycloak__admin_password \
+      keycloak__domain=http://$KEYCLOAK_SERVER_IP \
+      hol_keycloak_realm=master \
+      hol_session_name=$workshop_name-aw-cdp-user-group"
    sleep 5
    echo -e "\n               =============================Fetching Details: Please Wait=========================="
    sample_keycloak_user1=$(cat /tmp/$workshop_name-aw-cdp-user-group.json | jq -r '.[0].username')
@@ -933,10 +927,11 @@ cdp_idp_user_teardown() {
    cd /userconfig/.$USER_NAMESPACE/keycloak_ansible_config
    ansible-playbook keycloak_hol_user_teardown.yml --extra-vars \
       "keycloak__admin_username=admin \
-    keycloak__admin_password=$keycloak__admin_password \
-    keycloak__domain=http://$KEYCLOAK_SERVER_IP \
-    hol_keycloak_realm=master \
-    hol_session_name=$workshop_name-aw-cdp-user-group"
+      ansible_python_interpreter=/usr/bin/python3 \
+      keycloak__admin_password=$keycloak__admin_password \
+      keycloak__domain=http://$KEYCLOAK_SERVER_IP \
+      hol_keycloak_realm=master \
+      hol_session_name=$workshop_name-aw-cdp-user-group"
    sleep 10
    echo "               ====================Removing IDP From CDP Tenant============================================="
    cdp iam delete-saml-provider --saml-provider-name $workshop_name
@@ -981,18 +976,20 @@ deploy_cdw() {
 
    ansible-playbook $DS_CONFIG_DIR/enable-cdw.yml --extra-vars \
       "cdp_env_name=$workshop_name-cdp-env \
-   env_lb_public_subnet=$ENV_PUBLIC_SUBNETS \
-   env_wrkr_private_subnet=$ENV_PRIVATE_SUBNETS \
-   workshop_name=$workshop_name \
-   vw_size=$cdw_vrtl_warehouse_size \
-   cdvc_size=$cdw_dataviz_size \
-   number_vw_to_create=$number_vw_to_create"
+      ansible_python_interpreter=/usr/bin/python3 \
+      env_lb_public_subnet=$ENV_PUBLIC_SUBNETS \
+      env_wrkr_private_subnet=$ENV_PRIVATE_SUBNETS \
+      workshop_name=$workshop_name \
+      vw_size=$cdw_vrtl_warehouse_size \
+      cdvc_size=$cdw_dataviz_size \
+      number_vw_to_create=$number_vw_to_create"
 }
 #--------------------------------------------------------------------------------------------------#
 disable_cdw() {
    echo "               ==========================Disabling CDW======================================"
    ansible-playbook $DS_CONFIG_DIR/disable-cdw.yml --extra-vars \
-      "cdp_env_name=$workshop_name-cdp-env"
+      "ansible_python_interpreter=/usr/bin/python3 \
+      cdp_env_name=$workshop_name-cdp-env"
 }
 #--------------------------------------------------------------------------------------------------#
 #--------------------------------------------------------------------------------------------------#
@@ -1008,20 +1005,22 @@ deploy_cde() {
 
    ansible-playbook $DS_CONFIG_DIR/enable-cde.yml --extra-vars \
       "cdp_env_name=$workshop_name-cdp-env \
-   workshop_name=$workshop_name \
-   instance_type=$cde_instance_type \
-   initial_instances=$cde_initial_instances \
-   minimum_instances=$cde_min_instances \
-   maximum_instances=$cde_max_instances \
-   spark_version=$cde_spark_version \
-   number_vc_to_create=$number_vc_to_create"
+      ansible_python_interpreter=/usr/bin/python3 \
+      workshop_name=$workshop_name \
+      instance_type=$cde_instance_type \
+      initial_instances=$cde_initial_instances \
+      minimum_instances=$cde_min_instances \
+      maximum_instances=$cde_max_instances \
+      spark_version=$cde_spark_version \
+      number_vc_to_create=$number_vc_to_create"
 
 }
 #--------------------------------------------------------------------------------------------------#
 disable_cde() {
    echo "               ==========================Disabling CDE======================================"
    ansible-playbook $DS_CONFIG_DIR/disable-cde.yml --extra-vars \
-      "workshop_name=$workshop_name"
+      "ansible_python_interpreter=/usr/bin/python3 \
+      workshop_name=$workshop_name"
 }
 #--------------------------------------------------------------------------------------------------#
 #--------------------------------------------------------------------------------------------------#
@@ -1030,15 +1029,16 @@ deploy_cml() {
    #number_vws_to_create=$(( ($number_of_workshop_users / 10) + ($number_of_workshop_users % 10 > 0) ))
    ansible-playbook $DS_CONFIG_DIR/enable-cml.yml --extra-vars \
       "cdp_env_name=$workshop_name-cdp-env \
-   workshop_name=$workshop_name \
-   ws_instance_type=$cml_ws_instance_type \
-   minimum_instances=$cml_min_instances \
-   maximum_instances=$cml_max_instances \
-   root_volume_size=256 \
-   enable_gpu=$cml_enable_gpu \
-   gpu_instance_type=$cml_gpu_instance_type \
-   minimum_gpu_instances=$cml_min_gpu_instances \
-   maximum_gpu_instances=$cml_max_gpu_instances"
+      ansible_python_interpreter=/usr/bin/python3 \
+      workshop_name=$workshop_name \
+      ws_instance_type=$cml_ws_instance_type \
+      minimum_instances=$cml_min_instances \
+      maximum_instances=$cml_max_instances \
+      root_volume_size=256 \
+      enable_gpu=$cml_enable_gpu \
+      gpu_instance_type=$cml_gpu_instance_type \
+      minimum_gpu_instances=$cml_min_gpu_instances \
+      maximum_gpu_instances=$cml_max_gpu_instances"
    #number_vws_to_create=$number_vws_to_create"
 }
 #--------------------------------------------------------------------------------------------------#
@@ -1046,7 +1046,8 @@ disable_cml() {
    echo "               ==========================Disabling CML======================================"
    ansible-playbook $DS_CONFIG_DIR/disable-cml.yml --extra-vars \
       "cdp_env_name=$workshop_name-cdp-env \
-   workshop_name=$workshop_name"
+      ansible_python_interpreter=/usr/bin/python3 \
+      workshop_name=$workshop_name"
 }
 #--------------------------------------------------------------------------------------------------#
 #--------------------------------------------------------------------------------------------------#
